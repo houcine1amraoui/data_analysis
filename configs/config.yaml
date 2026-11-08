@@ -1,0 +1,3 @@
+# User overrides (deep-merged on top of configs/defaults.yaml).
+# Safe to overwrite from the Colab runner: anything you omit falls back to defaults.
+{}

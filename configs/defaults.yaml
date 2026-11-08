@@ -1,0 +1,82 @@
+run_name: phase1_audit
+
+paths:
+  output_dir: null        # default: {project_root_dir}/outputs/{run_name}
+  cache_dir: null         # default: {project_root_dir}/cache/data_analysis
+  misc_dir: null          # default: auto-discovered (folder holding CUStatesMap.json)
+  master_files: null      # optional explicit list of master CSV paths (skips discovery)
+
+files:
+  master: ["Phy_CU_BRE_Master.csv"]
+  fallback_masters: ["CUMaster.csv", "BREMaster.csv", "SensorDataMasterTransposed.csv"]
+  states_map: CUStatesMap.json
+  activity_r1: ActivityLogR1.csv
+  activity_r2: ActivityLogR2.csv
+  activity_labels: ActivityLabels.json
+  pid_map: PIDMap.json
+  metadata_overrides: sensor_metadata_overrides.csv   # optional, lives in misc_dir
+
+timestamp_col: Timestamp
+grid_seconds: 1            # sampling grid of the master file (paper: 1 s)
+value_dtype: float32
+chunk_rows: 200000
+force_reconvert: false
+
+# Half-open intervals [start, end). Confirm against the activity logs.
+periods:
+  T1: ["2022-10-18 00:00:00", "2022-11-08 00:00:00"]   # User 1, first period
+  T2: ["2022-11-08 00:00:00", "2022-11-11 00:00:00"]   # User 2
+  T3: ["2022-11-11 00:00:00", "2022-11-18 00:00:00"]   # User 1 returns
+t1_split: "2022-11-02"     # sensor regime change inside T1 (Sensirion added, glitch repair)
+dst_change: "2022-10-30 02:00:00"   # UK clock change (BST->GMT), for log/clock alignment check
+daytime: [8, 19]           # hours used for behavioural features
+
+# Known valid recording range per source (padding outside is NOT real data).
+# Physical range from Table 26 of the paper. Remove/extend as you learn more.
+source_valid_ranges:
+  PHY: ["2022-10-19 13:27:15", "2022-11-17 11:27:03"]
+
+stages: [convert, profile, behavior, viz, report]
+
+# Hours of joint inactivity (no change in ANY column of a source) worth reporting
+joint_gap_hours: {BRE: 12, PHY: 6, CU: 24, OTHER: 24}
+
+classification:             # provisional, qualitative thresholds (see Phase 1 document)
+  nonbehavioral_share: 0.5
+  unreliable_unavailable_share: 0.5
+  invalid_share: 0.01
+  nearly_constant_top_share: 0.999
+  nearly_constant_changes_per_day: 2.0
+  include_nearly_constant_in_candidates: false
+  housekeeping_regex: "battery|power_outage|update_available|filter_|brush_left|sensor_dirty|last_clean|current_version|last_reboot|sensitivity|angle_|_led$|buzzer|child_lock|favorite_level|motor_speed|link_speed|storage|app_memory|rx_gb|tx_gb"
+
+range_rules:                # first match wins; applied to real (non-sentinel) values
+  - {pattern: "battery_low|low_battery", binary: true}
+  - {pattern: "battery", lo: 0, hi: 100}
+  - {pattern: "humidity", lo: 0, hi: 100}
+  - {pattern: "temperature|^temp", lo: -20, hi: 60}
+  - {pattern: "illuminance|lux", lo: 0, hi: 200000}
+  - {pattern: "masspm|numpm|tpm|pm2_5|pm_?\\d", lo: 0, hi: 10000}
+  - {pattern: "contact|occupancy|motion|vibration|tamper|moving|leak", binary: true}
+
+state_class_overrides: {}   # e.g. {"wifi": "state"} to override automatic sentinel classification
+
+behavior:
+  scopes: [logged_days, all_days]
+  variants: [all_sensors, no_phone]
+  std_floor: 0.25
+  n_perm: 2000
+  min_active_minutes: 20
+  seed: 0
+  offsets_hours: [-2, -1, 0, 1, 2]
+
+viz:
+  dpi: 110
+  n_dist_plots: 24
+  max_corr_features: 150
+
+raw_audit:                   # optional, untested on real RAW files; see README
+  enabled: false
+  cu_raw_glob: "CU_CyPhy_*.csv"
+  bre_raw_glob: "BRE_CyPhy_W*.csv"
+  bre_gap_minutes: 60
