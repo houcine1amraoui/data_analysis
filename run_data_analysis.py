@@ -75,15 +75,21 @@ def main(argv=None):
     pd.DataFrame([prof["ts_report"]]).T.to_csv(out / "tables" / "A_timestamp_report.csv", header=["value"])
     prof["ts_gaps"].to_csv(out / "tables" / "A_timestamp_gaps.csv", index=False)
     prof["joint_gaps"].to_csv(out / "tables" / "A_joint_inactivity_gaps.csv", index=False)
+    prof["joint_unavailable"].to_csv(out / "tables" / "A_joint_unavailable_runs.csv", index=False)
     log.info("Classification: %s", cls.category.value_counts().to_dict())
 
     results, align = [], None
     if "behavior" in stages:
-        from src.behavior import label_alignment, run_behavior
+        from src.behavior import label_alignment, run_behavior, summarize
         for variant in cfg["behavior"]["variants"]:
-            for scope in cfg["behavior"]["scopes"]:
-                log.info("Behaviour: %s / %s", variant, scope)
-                results.append(run_behavior(prof, cls, misc, cfg, variant, scope, out / "tables"))
+            for fset in cfg["behavior"]["feature_sets"]:
+                for scope in cfg["behavior"]["scopes"]:
+                    r = run_behavior(prof, cls, misc, cfg, variant, fset, scope, out / "tables")
+                    log.info("Behaviour %s/%s/%s: %s", variant, fset, scope, "skipped" if r is None else "ok")
+                    if r is not None:
+                        results.append(r)
+        if results:
+            summarize(results).to_csv(out / "tables" / "behavior_summary.csv", index=False)
         try:
             align = label_alignment(prof, cls, misc, cfg, out / "tables")
         except Exception as e:

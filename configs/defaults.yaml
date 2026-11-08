@@ -45,7 +45,7 @@ classification:             # provisional, qualitative thresholds (see Phase 1 d
   nonbehavioral_share: 0.5
   unreliable_unavailable_share: 0.5
   invalid_share: 0.01
-  nearly_constant_top_share: 0.999
+  nearly_constant_top_share: 0.999      # continuous/discrete columns only
   nearly_constant_changes_per_day: 2.0
   include_nearly_constant_in_candidates: false
   housekeeping_regex: "battery|power_outage|update_available|filter_|brush_left|sensor_dirty|last_clean|current_version|last_reboot|sensitivity|angle_|_led$|buzzer|child_lock|favorite_level|motor_speed|link_speed|storage|app_memory|rx_gb|tx_gb"
@@ -56,14 +56,25 @@ range_rules:                # first match wins; applied to real (non-sentinel) v
   - {pattern: "humidity", lo: 0, hi: 100}
   - {pattern: "temperature|^temp", lo: -20, hi: 60}
   - {pattern: "illuminance|lux", lo: 0, hi: 200000}
-  - {pattern: "masspm|numpm|tpm|pm2_5|pm_?\\d", lo: 0, hi: 10000}
+  - {pattern: "masspm|numpm|tpm|pm2_5|pm_?\\d|mass concentration", lo: 0, hi: 10000}
+  - {pattern: "number concentration|particle size", lo: 0, hi: 1000000}
   - {pattern: "contact|occupancy|motion|vibration|tamper|moving|leak", binary: true}
 
 state_class_overrides: {}   # e.g. {"wifi": "state"} to override automatic sentinel classification
 
+freeze:                      # terminal-freeze detection (sensor stops changing, forward fill keeps it "valid")
+  thresholds_h: {PHY: 6, BRE: 48, CU: 72, OTHER: 48}   # applied to continuous/discrete columns only
+  types: [continuous, discrete]
+  propagate_to_device: true  # binary sensors of a device inherit the freeze time of its frozen continuous channels
+
+unavailable_runs: {min_share: 0.8, min_minutes: 60}   # joint "unknown/unavailable" outages per source
+
 behavior:
   scopes: [logged_days, all_days]
-  variants: [all_sensors, no_phone]
+  variants: [all_sensors, CU, BRE, PHY, no_phone]    # no_phone only runs if phone columns exist
+  feature_sets: [events, levels, combined]            # events = binary change counts; levels = daytime mean/std of continuous channels
+  min_overlap_features: 8
+  n_draw_random_windows: 20
   std_floor: 0.25
   n_perm: 2000
   min_active_minutes: 20

@@ -74,15 +74,25 @@ for nm in ["A6-00-K1_temperature_x", "A6-01-B1_temperature_x", "A6-00-L1_humidit
     base = 20 + np.cumsum(rng.normal(0, 0.02, n))
     cols[nm] = bre((base * 10).round() / 10) if "humidity" not in nm else bre(np.clip(base + 25, 0, 100).round(1))
 cols["OC-02-S1_tamper"] = np.zeros(n)
+base = 20 + np.cumsum(rng.normal(0, 0.02, n)); cols["A6-00-K1_temperature_y"] = bre((base * 10).round() / 10)
+
 # --- Physical (padding before first real reading) ---
 pad = sec < (pd.Timestamp("2022-10-19 13:27:15") - ts[0]).total_seconds()
 for did in (1, 3):
     t = 21 + np.cumsum(rng.normal(0, 0.01, n)); t[pad] = t[~pad][0]
     cols[f"Temp_{did}"] = t.round(2)
     h = 45 + np.cumsum(rng.normal(0, 0.05, n)); h[pad] = h[~pad][0]; cols[f"Humidity_{did}"] = np.clip(h, 0, 100).round(2)
-    l = np.where(active, 300 + 50 * rng.standard_normal(n), 2).round(1); l[pad] = l[~pad][0]; cols[f"Lux_{did}"] = l
+    l = np.where(active, 300 + 50 * rng.standard_normal(n), 2 + 0.2 * rng.standard_normal(n)).round(2); l[pad] = l[~pad][0]; cols[f"Lux_{did}"] = l
     cols[f"MassPM2.5_{did}"] = np.maximum(0, 5 + 3 * rng.standard_normal(n) * active).round(2)
 cols["Temp_2"] = np.full(n, 22.0)    # stuck sensor (constant)
+# --- freezes: BRE "_y" device dies 26 Oct 14:00; physical PM channel of RPi-1 freezes 6 Nov 05:00
+def freeze_from(name, when):
+    i = int(np.searchsorted(ts.to_numpy(), np.datetime64(when)))
+    cols[name] = cols[name].copy(); cols[name][i:] = cols[name][i - 1]
+for nm in [k for k in list(cols) if k.endswith("_y")]:
+    freeze_from(nm, "2022-10-26 14:00:00")
+for nm in ["MassPM2.5_1"]:
+    freeze_from(nm, "2022-11-06 05:00:00")
 df = pd.DataFrame(cols); df.insert(0, "Timestamp", ts)
 df.to_csv(out / "Master" / "Phy_CU_BRE_Master.csv", index=False)
 print("wrote", df.shape, "grid", GRID, "s")

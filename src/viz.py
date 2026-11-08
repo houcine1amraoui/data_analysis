@@ -69,13 +69,39 @@ def fig_daily_activity(prof, cls, cfg, out, dpi):
     _save(fig, out / "D2b_daily_activity_by_source.png", dpi)
 
 
+def _pick(cls, n):
+    """Round-robin over sources so noisy physical channels do not crowd everything else out."""
+    cand = cls[cls.behavioral_candidate].sort_values("t1_changes_per_day", ascending=False)
+    groups = [list(cand.index[cand.source == s]) for s in SRC_ORDER]
+    out = []
+    while len(out) < n and any(groups):
+        for g in groups:
+            if g and len(out) < n:
+                out.append(g.pop(0))
+    return out
+
+
+def fig_freeze_map(prof, cls, cfg, out, dpi):
+    cols = [c for c in _order(cls)]
+    end_h = prof["end_sec"] / 3600
+    fig, ax = plt.subplots(figsize=(14, max(4, 0.045 * len(cols) + 2)))
+    for i, c in enumerate(cols):
+        u = cls.loc[c, "usable_until_sec"]
+        if pd.notna(u):
+            ax.barh(i, end_h - u / 3600, left=u / 3600, color="firebrick", height=1.0)
+    ax.set_ylim(len(cols), -1), ax.set_xlim(0, end_h)
+    ax.set_title("Frozen tails: red = sensor (or its device) no longer changes, values are forward-filled")
+    ax.set_xlabel("hours since start"), ax.set_ylabel("sensors (grouped by source)")
+    _period_lines(ax, cfg, prof["t0"].floor("h"), 3600)
+    _save(fig, out / "D1b_frozen_tails.png", dpi)
+
+
 def _slice(df, a, b):
     return df[(df.index >= pd.Timestamp(a)) & (df.index < pd.Timestamp(b))]
 
 
 def fig_distributions(prof, cls, cfg, out, dpi):
-    cand = cls[cls.behavioral_candidate].sort_values("t1_changes_per_day", ascending=False)
-    cols = list(cand.index[: cfg["viz"]["n_dist_plots"]])
+    cols = _pick(cls, cfg["viz"]["n_dist_plots"])
     if not cols:
         return
     n = len(cols)
@@ -93,8 +119,7 @@ def fig_distributions(prof, cls, cfg, out, dpi):
 
 
 def fig_corr(prof, cls, cfg, out, dpi):
-    cand = cls[cls.behavioral_candidate].sort_values("t1_changes_per_day", ascending=False)
-    cols = list(cand.index[: cfg["viz"]["max_corr_features"]])
+    cols = _pick(cls, cfg["viz"]["max_corr_features"])
     if len(cols) < 3:
         return
     M = prof["minute"][cols]
@@ -119,21 +144,21 @@ def fig_corr(prof, cls, cfg, out, dpi):
 
 def fig_hourly_profiles(res, out, dpi):
     a = res.get("_artifacts")
-    if not a:
+    if not a or a.get("hourly") is None:
         return
     fig, ax = plt.subplots(figsize=(8, 3.5))
     for g in a["hourly"].columns:
         ax.plot(a["hourly"].index, a["hourly"][g] / max(a["hourly"][g].sum(), 1), marker="o", ms=3, label=g)
     ax.set_xlabel("hour of day"), ax.set_ylabel("share of state changes"), ax.legend()
-    ax.set_title(f"Hourly activity profile ({res['variant']} / {res['scope']})")
-    _save(fig, out / f"D5_hourly_profile__{res['variant']}__{res['scope']}.png", dpi)
+    ax.set_title(f"Hourly event profile ({res['variant']} / {res['fset']} / {res['scope']})")
+    _save(fig, out / f"D5_hourly_profile__{res['variant']}__{res['fset']}__{res['scope']}.png", dpi)
 
 
 def fig_behavior(res, out, dpi):
     a = res.get("_artifacts")
     if not a:
         return
-    tag = f"{res['variant']}__{res['scope']}"
+    tag = f"{res['variant']}__{res['fset']}__{res['scope']}"
     order = np.argsort(a["dates"])
     fig, axs = plt.subplots(1, 3, figsize=(17, 5))
     im = axs[0].imshow(a["Dm"][np.ix_(order, order)], cmap="magma_r")
@@ -163,12 +188,14 @@ def make_figures(prof, cls, behavior_results, cfg, out_dir):
     out.mkdir(parents=True, exist_ok=True)
     (Path(out_dir) / "tables").mkdir(exist_ok=True)
     dpi = cfg["viz"]["dpi"]
-    for fn in (fig_missing_matrix, fig_activity_heatmap, fig_daily_activity, fig_distributions, fig_corr):
+    for fn in (fig_missing_matrix, fig_freeze_map, fig_activity_heatmap, fig_daily_activity, fig_distributions, fig_corr):
         try:
             fn(prof, cls, cfg, out, dpi)
         except Exception as e:  # keep going: one broken figure must not kill the run
             log.exception("figure %s failed: %s", fn.__name__, e)
     for r in behavior_results:
+        if r["scope"] != "logged_days" and r["variant"] not in ("all_sensors",):
+            continue   # keep the number of figures manageable
         for fn in (fig_hourly_profiles, fig_behavior):
             try:
                 fn(r, out, dpi)

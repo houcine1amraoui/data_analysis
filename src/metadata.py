@@ -34,7 +34,7 @@ FLOOR_CODE = {"00": "GF", "01": "FF", "02": "SF"}
 RE_CU = re.compile(r"^(binary_sensor|sensor|switch|light|climate|vacuum|fan|number|select|humidifier|"
                    r"media_player|device_tracker|update|input_\w+|automation|weather|person|camera)\.")
 RE_BRE = re.compile(r"^([A-Z0-9]{2})-(\d{2})-([A-Z0-9]+)_(.+)$")
-KINDS = ["battery_low", "battery", "power_outage", "update_available", "temperature", "humidity", "illuminance",
+KINDS = ["battery_low", "mass concentration", "number concentration", "particle size", "ultraviolet", "battery", "power_outage", "update_available", "temperature", "temp", "humidity", "illuminance",
          "lux", "pressure", "noise", "masspm", "numpm", "tpm", "prox", "motion", "occupancy", "contact",
          "vibration", "tamper", "moving", "leak", "voltage", "consumption", "current", "light", "switch",
          "media_player", "climate", "vacuum", "fan", "humidifier", "kettle", "tracker", "wifi", "volume",
@@ -88,8 +88,8 @@ def build_metadata(columns, misc_dir, cfg):
                      floor=FLOOR_CODE.get(fl, ""), kind=kind_of(rest), network_guess=net, confidence="parsed")
         else:
             r["source"] = "PHY"
-            mm = (re.search(r"(?:rpi|dev(?:id)?)[_\-]?(\d)", col.lower()) or re.search(r"_(\d)$", col)
-                  or re.search(r"^(\d)_", col))
+            mm = re.match(r"^Phy_(\d)_(.+)$", col) or re.search(r"(?:rpi|dev(?:id)?)[_\-]?(\d)", col.lower()) \
+                or re.search(r"_(\d)$", col) or re.search(r"^(\d)_", col)
             if mm and int(mm.group(1)) in RPI_ROOM:
                 did = int(mm.group(1))
                 r.update(pid=did, device=f"RPi-{did}", location=RPI_ROOM[did],

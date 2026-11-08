@@ -134,12 +134,25 @@ def profile_columns(store, meta, decoder, cfg):
         else:
             rec["data_type"] = "continuous"
         rec["invalid_share"], rec["range_rule"] = _range_violation(col, rv, cls, rdur, cfg["range_rules"])
+        first_valid = float(rt[valid][0]) if valid.any() else np.nan
+        rec["first_valid"] = str(t0 + pd.Timedelta(seconds=first_valid)) if valid.any() else ""
         if len(ev):
             gp = np.diff(np.r_[0.0, ev, end_sec])
+            pos = np.r_[0.0, ev]
             rec.update(first_change=str(t0 + pd.Timedelta(seconds=float(ev[0]))),
-                       last_change=str(t0 + pd.Timedelta(seconds=float(ev[-1]))), longest_flat_h=gp.max() / 3600)
+                       last_change=str(t0 + pd.Timedelta(seconds=float(ev[-1]))), longest_flat_h=gp.max() / 3600,
+                       longest_flat_start=str(t0 + pd.Timedelta(seconds=float(pos[gp.argmax()]))))
+            last_ev = float(ev[-1])
         else:
-            rec.update(first_change="", last_change="", longest_flat_h=end_sec / 3600)
+            rec.update(first_change="", last_change="", longest_flat_h=end_sec / 3600, longest_flat_start="")
+            last_ev = first_valid
+        va_ = vr.get(src)
+        eff_end = min(end_sec, va_[1]) if va_ else end_sec          # padding after the real recording is not "frozen"
+        rec["tail_flat_h"] = max(eff_end - last_ev, 0.0) / 3600 if valid.any() else np.nan
+        thr_h = cfg["freeze"]["thresholds_h"].get(src, cfg["freeze"]["thresholds_h"].get("OTHER", 48))
+        frozen = valid.any() and rec["data_type"] in cfg["freeze"]["types"] and rec["tail_flat_h"] >= thr_h
+        rec["freeze_start_sec"] = last_ev if frozen else np.nan
+        rec["frozen_tail"] = bool(frozen)
         rec["housekeeping"] = bool(hk.search(col.lower()))
         va = vr.get(src)
         rec["valid_range_share"] = ((min(va[1], end_sec) - max(va[0], 0)) / end_sec) if va else 1.0
@@ -188,5 +201,16 @@ def profile_columns(store, meta, decoder, cfg):
                            threshold_h=thr))
     jg = pd.DataFrame(jg).sort_values(["source", "start"]) if jg else pd.DataFrame(
         columns=["source", "start", "end", "hours", "threshold_h"])
+    # Joint unavailability per source (e.g. Home Assistant offline -> every CU column 'unknown')
+    ua, ucfg = [], cfg["unavailable_runs"]
+    for src in sorted(set(meta.loc[store.columns, "source"])):
+        cols = [c for c in store.columns if meta.loc[c, "source"] == src]
+        share = mdf[cols].isna().mean(axis=1).to_numpy() >= ucfg["min_share"]
+        edges = np.flatnonzero(np.diff(np.r_[0, share.astype(int), 0]))
+        for a_, b_ in zip(edges[::2], edges[1::2]):
+            if b_ - a_ >= ucfg["min_minutes"]:
+                ua.append(dict(source=src, start=mdf.index[a_], end=mdf.index[b_ - 1], hours=(b_ - a_) / 60,
+                               n_columns=len(cols)))
+    ua = pd.DataFrame(ua) if ua else pd.DataFrame(columns=["source", "start", "end", "hours", "n_columns"])
     return dict(profile=prof, events=events, minute=mdf, hourly=hdf, t0=t0, end_sec=end_sec,
-                ts_report=rep, ts_gaps=gaps, joint_gaps=jg, bounds=bounds)
+                ts_report=rep, ts_gaps=gaps, joint_gaps=jg, joint_unavailable=ua, bounds=bounds)
